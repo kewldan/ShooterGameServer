@@ -1,7 +1,30 @@
 import hashlib
+import struct
 import threading
 import socket
 from uuid import uuid1, UUID
+
+
+class ClientEventType:
+    DISCONNECTED = 1
+    CONNECTED = 2
+
+
+class ClientPacketTypes:
+    HANDSHAKE = 2
+    UPDATE = 4
+    EXIT = 8
+
+
+class ServerPacketTypes:
+    HANDSHAKE = 1
+    UPDATE = 3
+    KICK = 5
+
+
+class PacketTypes:
+    CLIENT_SIDE = ClientPacketTypes
+    SERVER_SIDE = ServerPacketTypes
 
 
 class Packet:
@@ -40,7 +63,8 @@ class Server:
         self.socket.bind(('', port))
         self.socket.listen(max_connections)
 
-        self.handlers = []
+        self.packet_handler = None
+        self.client_handler = None
         self.clients = {}
 
     def start(self):
@@ -49,10 +73,13 @@ class Server:
             client_id = uuid1()
             client = Client(conn, addr, self, client_id)
             self.clients[client_id] = client
-            print("New client with id:", client_id)
+            self.client_handler(ClientEventType.CONNECTED, client)
 
-    def add_handler(self, handler):
-        self.handlers.append(handler)
+    def set_packet_handler(self, handler):
+        self.packet_handler = handler
+
+    def set_client_handler(self, handler):
+        self.client_handler = handler
 
     def stop(self):
         for client in self.clients:
@@ -67,7 +94,8 @@ class Client:
         self.address = address
         self.master = server
         self.id = my_id
-        self.packetListener = threading.Thread(target=self.listen_packets, args=(self, ), daemon=True)
+        self.authorized = False
+        self.packetListener = threading.Thread(target=self.listen_packets, args=(self,), daemon=True)
         self.packetListener.start()
 
     def listen_packets(self, _):
@@ -80,14 +108,21 @@ class Client:
                 break
             else:
                 packet = Packet(data)
-                for handler in self.master.handlers:
-                    handler(packet)
+                self.master.packet_handler(packet, self)
 
         self.connection.close()
         del self.master.clients[self.id]
-        print("Client disconnected with id:", self.id)
+        self.master.client_handler(ClientEventType.DISCONNECTED, self)
+
+    def send_packet(self, payload, packet_type: int):
+        data = []
+        data += struct.pack('h', 18 + len(payload))
+        data += list(hashlib.md5(bytes(payload)).digest())
+        data += struct.pack('h', packet_type)
+        data += payload
+
+        self.connection.send(bytes(data))
+        pass
 
     def __str__(self) -> str:
-        return f'Client(id={self.id})'
-
-
+        return f'Client(id={self.id},auth={self.authorized})'
