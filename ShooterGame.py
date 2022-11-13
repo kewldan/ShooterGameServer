@@ -1,8 +1,8 @@
 import hashlib
+import random
 import struct
 import threading
 import socket
-from uuid import uuid1, UUID
 
 
 class ClientEventType:
@@ -13,18 +13,11 @@ class ClientEventType:
 class ClientPacketTypes:
     HANDSHAKE = 2
     UPDATE = 4
-    EXIT = 8
 
 
 class ServerPacketTypes:
     HANDSHAKE = 1
     UPDATE = 3
-    KICK = 5
-
-
-class PacketTypes:
-    CLIENT_SIDE = ClientPacketTypes
-    SERVER_SIDE = ServerPacketTypes
 
 
 class Packet:
@@ -70,7 +63,7 @@ class Server:
     def start(self):
         while True:
             conn, addr = self.socket.accept()
-            client_id = uuid1()
+            client_id = str(random.randint(1, 2 ** 24))
             client = Client(conn, addr, self, client_id)
             self.clients[client_id] = client
             self.client_handler(ClientEventType.CONNECTED, client)
@@ -89,7 +82,7 @@ class Server:
 
 
 class Client:
-    def __init__(self, connection: socket.socket, address, server: Server, my_id: UUID):
+    def __init__(self, connection: socket.socket, address, server: Server, my_id: str):
         self.connection = connection
         self.address = address
         self.master = server
@@ -104,12 +97,13 @@ class Client:
                 data = self.connection.recv(65536)
             except ConnectionResetError:
                 break
+            except ConnectionAbortedError:
+                break
             if data is None or not data:
                 break
             else:
                 packet = Packet(data)
                 self.master.packet_handler(packet, self)
-
         self.connection.close()
         del self.master.clients[self.id]
         self.master.client_handler(ClientEventType.DISCONNECTED, self)
