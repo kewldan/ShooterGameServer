@@ -1,4 +1,3 @@
-import hashlib
 import random
 import struct
 import threading
@@ -18,22 +17,14 @@ class ClientPacketTypes:
 class ServerPacketTypes:
     HANDSHAKE = 1
     UPDATE = 3
+    MESSAGE = 5
 
 
 class Packet:
-    def __init__(self, data: bytes):
-        self.__validated = None
-        self.__length = data[1] << 8 | data[0]
-        self.__sign = data[2:18]
-        self.__type = data[19] << 8 | data[18]
-        self.__payload = data[20:]
-
-    def isValid(self) -> bool:
-        if self.__validated is None:
-            calculated_sign = hashlib.md5(self.__payload).digest()
-            self.__validated = calculated_sign == self.__sign
-
-        return self.__validated
+    def __init__(self, payload_length: int, packet_type: int, packet_payload_buffer: bytes):
+        self.__length = payload_length
+        self.__type = packet_type
+        self.__payload = packet_payload_buffer
 
     def getPayload(self) -> bytes:
         return self.__payload
@@ -41,11 +32,8 @@ class Packet:
     def getType(self) -> int:
         return self.__type
 
-    def getSign(self) -> bytes:
-        return self.__sign
-
     def __str__(self) -> str:
-        return f'Packet(length={self.__length},type={self.__type},valid={self.isValid()})'
+        return f'Packet(length={self.__length},type={self.__type})'
 
 
 class Server:
@@ -94,24 +82,30 @@ class Client:
     def listen_packets(self, _):
         while True:
             try:
-                data = self.connection.recv(65536)
+                packet_header_buffer = self.connection.recv(4)
+                if not packet_header_buffer:
+                    break
+                else:
+                    payload_length = packet_header_buffer[1] << 8 | packet_header_buffer[0]
+                    packet_type = packet_header_buffer[3] << 8 | packet_header_buffer[2]
+
+                    packet_payload_buffer = self.connection.recv(payload_length)
+                    if not packet_payload_buffer:
+                        break
+                    else:
+                        packet = Packet(payload_length, packet_type, packet_payload_buffer)
+                        self.master.packet_handler(packet, self)
             except ConnectionResetError:
                 break
             except ConnectionAbortedError:
                 break
-            if data is None or not data:
-                break
-            else:
-                packet = Packet(data)
-                self.master.packet_handler(packet, self)
         self.connection.close()
         del self.master.clients[self.id]
         self.master.client_handler(ClientEventType.DISCONNECTED, self)
 
     def send_packet(self, payload, packet_type: int):
         data = []
-        data += struct.pack('h', 18 + len(payload))
-        data += list(hashlib.md5(bytes(payload)).digest())
+        data += struct.pack('h', len(payload))
         data += struct.pack('h', packet_type)
         data += payload
 
