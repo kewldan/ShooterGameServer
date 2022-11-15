@@ -12,12 +12,14 @@ class ClientEventType:
 class ClientPacketTypes:
     HANDSHAKE = 2
     UPDATE = 4
+    MESSAGE = 8
 
 
 class ServerPacketTypes:
     HANDSHAKE = 1
     UPDATE = 3
     MESSAGE = 5
+    KICK = 7
 
 
 class Packet:
@@ -34,6 +36,9 @@ class Packet:
 
     def __str__(self) -> str:
         return f'Packet(length={self.__length},type={self.__type})'
+
+    def getLength(self):
+        return self.__length
 
 
 class Server:
@@ -80,8 +85,8 @@ class Client:
         self.packetListener.start()
 
     def listen_packets(self, _):
-        while True:
-            try:
+        try:
+            while True:
                 packet_header_buffer = self.connection.recv(4)
                 if not packet_header_buffer:
                     break
@@ -95,10 +100,8 @@ class Client:
                     else:
                         packet = Packet(payload_length, packet_type, packet_payload_buffer)
                         self.master.packet_handler(packet, self)
-            except ConnectionResetError:
-                break
-            except ConnectionAbortedError:
-                break
+        except:
+            pass
         self.connection.close()
         del self.master.clients[self.id]
         self.master.client_handler(ClientEventType.DISCONNECTED, self)
@@ -112,5 +115,51 @@ class Client:
         self.connection.send(bytes(data))
         pass
 
+    def send_update(self, players):
+        output = []
+        output += [len(players) - 1]
+        for player in players:
+            if player.client.id != self.id:
+                output += list(struct.pack('I', int(self.id)))
+                output += list(struct.pack('f', player.x))
+                output += list(struct.pack('f', player.y))
+                output += list(struct.pack('f', player.z))
+                output += list(struct.pack('f', player.rx))
+                output += list(struct.pack('f', player.ry))
+        self.send_packet(output, ServerPacketTypes.UPDATE)
+
+    def send_handshake(self):
+        output = []
+        output += list(struct.pack('I', int(self.id)))
+        self.send_packet(output, ServerPacketTypes.HANDSHAKE)
+
+    def send_message(self, sender: str, message: str):
+        output = []
+        output += [len(sender)]
+        output += list(sender.encode())
+        output += [len(message)]
+        output += list(message.encode())
+        self.send_packet(output, ServerPacketTypes.MESSAGE)
+
+    def kick(self, reason: str):
+        output = []
+        output += list(reason.encode())
+        self.send_packet(output, ServerPacketTypes.KICK)
+        self.connection.close()
+
     def __str__(self) -> str:
         return f'Client(id={self.id},auth={self.authorized})'
+
+
+class Player:
+    def __init__(self, client: Client, nickname: str):
+        self.nickname = nickname
+        self.client = client
+        self.x = 0.0
+        self.y = 0.0
+        self.z = 0.0
+        self.rx = 0.0
+        self.ry = 0.0
+
+    def __str__(self) -> str:
+        return f'Player(name={self.nickname},client={self.client},pos=({self.x},{self.y},{self.z}))'
