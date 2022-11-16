@@ -2,6 +2,7 @@ import random
 import struct
 import threading
 import socket
+import time
 
 
 class ClientEventType:
@@ -12,7 +13,8 @@ class ClientEventType:
 class ClientPacketTypes:
     HANDSHAKE = 2
     UPDATE = 4
-    MESSAGE = 8
+    MESSAGE = 6
+    GET_PLAYER = 8
 
 
 class ServerPacketTypes:
@@ -20,6 +22,7 @@ class ServerPacketTypes:
     UPDATE = 3
     MESSAGE = 5
     KICK = 7
+    PLAYER_INFO = 9
 
 
 class Packet:
@@ -100,7 +103,9 @@ class Client:
                     else:
                         packet = Packet(payload_length, packet_type, packet_payload_buffer)
                         self.master.packet_handler(packet, self)
-        except:
+        except ConnectionAbortedError:
+            pass
+        except ConnectionResetError:
             pass
         self.connection.close()
         del self.master.clients[self.id]
@@ -120,7 +125,7 @@ class Client:
         output += [len(players) - 1]
         for player in players:
             if player.client.id != self.id:
-                output += list(struct.pack('I', int(self.id)))
+                output += list(struct.pack('I', int(player.client.id)))
                 output += list(struct.pack('f', player.x))
                 output += list(struct.pack('f', player.y))
                 output += list(struct.pack('f', player.z))
@@ -145,7 +150,14 @@ class Client:
         output = []
         output += list(reason.encode())
         self.send_packet(output, ServerPacketTypes.KICK)
+        time.sleep(0.5)
         self.connection.close()
+
+    def send_player_info(self, id: int, nickname: str):
+        output = []
+        output += list(struct.pack('I', id))
+        output += list(nickname.encode())
+        self.send_packet(output, ServerPacketTypes.PLAYER_INFO)
 
     def __str__(self) -> str:
         return f'Client(id={self.id},auth={self.authorized})'

@@ -12,18 +12,19 @@ def packet_handler(packet: Packet, client: Client):
             nickname_length = payload[0]
             nickname = payload[1:nickname_length + 1].decode()
             if not nickname == "Server":
-                players.append(Player(client, nickname))
-                client.authorized = True
-                client.send_handshake()
-                print(nickname, "connected")
+                prob_player = get_player_by_name(nickname)
+                if not prob_player:
+                    players.append(Player(client, nickname))
+                    client.authorized = True
+                    client.send_handshake()
+                    print(nickname, "connected")
+                else:
+                    client.kick("Nickname already taken")
             else:
                 client.kick("Inaccessible nickname")
     if client.authorized:
-        sender = None
-        for player in players:
-            if player.client.id == client.id:
-                sender = player
-        if sender is not None:
+        sender = get_player_by_id(client.id)
+        if sender:
             if packet.getType() == ClientPacketTypes.UPDATE:
                 sender.x = struct.unpack('f', payload[:4])[0]
 
@@ -38,6 +39,11 @@ def packet_handler(packet: Packet, client: Client):
                 for player in players:
                     player.client.send_message(sender.nickname, message)
                 print('[' + sender.nickname + ']', message)
+            elif packet.getType() == ClientPacketTypes.GET_PLAYER:
+                player_id = struct.unpack('I', payload)[0]
+                player = get_player_by_id(str(player_id))
+                if player:
+                    client.send_player_info(player_id, player.nickname)
 
 
 def client_handler(type: ClientEventType, client: Client):
@@ -55,6 +61,12 @@ def client_handler(type: ClientEventType, client: Client):
 def get_player_by_name(nickname: str) -> Player:
     for player in players:
         if player.nickname == nickname:
+            return player
+
+
+def get_player_by_id(id: str) -> Player:
+    for player in players:
+        if player.client.id == id:
             return player
 
 
